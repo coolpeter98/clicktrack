@@ -8,7 +8,7 @@ that's an issue because it adds noise to solutions that would prevent auto-click
 
 ## building
 building is really straightforward, just clone the repo, install Zig, and run `zig build` in a terminal that is in the cloned directory. It should compile for your system automatically.
-if you are still lazy, head to the (releases)[https://github.com/coolpeter98/clicktrack/] page for prebuilt binaries.
+if you are still lazy, head to the [releases](https://github.com/coolpeter98/clicktrack/) page for prebuilt binaries.
 
 ## malware?
 if you're concerned about it being malware, the repo is open source, you can look for any traces of malware. the prebuilt binaries also do not have reverse-engineering measures such as obfuscation.
