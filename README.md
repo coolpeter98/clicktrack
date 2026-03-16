@@ -6,6 +6,9 @@ For years now, major game engines had one issue: input was bound to the client f
 this means that, if you click, you'll need to wait for the next frame to render before the game can process the input.
 that's an issue because it adds noise to solutions that would prevent auto-clickers. **clicktrack** fixes this!
 
+## limitation(s)
+**mouse polling rate** still causes an unavoidable delay. it should be fine on mice with polling rate >= 1kHz though
+
 ## building
 building is really straightforward, just clone the repo, install Zig, and run `zig build` in a terminal that is in the cloned directory. It should compile for your system automatically.
 if you are still lazy, head to the [releases](https://github.com/coolpeter98/clicktrack/) page for prebuilt binaries.
