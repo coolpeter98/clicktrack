@@ -1,0 +1,10 @@
+.{
+    .name = .clicktrack,
+    .version = "1.0.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+    .fingerprint = 0x6405b87fb5cd24e1,
+}
