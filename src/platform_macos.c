@@ -2,8 +2,9 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <unistd.h>
 
-extern void on_mouse_event(uint8_t button, int is_down, void *userdata);
+extern void on_mouse_event(uint8_t button, int is_down, int injected, void *userdata);
 
 static CFMachPortRef g_tap = NULL;
 
@@ -16,8 +17,17 @@ static CGEventRef tap_callback(
     (void)proxy;
 
     switch (type) {
-        case kCGEventLeftMouseDown: on_mouse_event(0, 1, userInfo); break;
-        case kCGEventLeftMouseUp:   on_mouse_event(0, 0, userInfo); break;
+        case kCGEventLeftMouseDown:
+        case kCGEventLeftMouseUp: {
+            // Events from physical devices have source state ID 1 (kCGEventSourceStateHIDSystemState).
+            // Events injected via CGEventPost/CGEventTapPostEvent use other source states.
+            // Also check the event source PID — 0 means hardware, nonzero means another process.
+            int64_t srcPid = CGEventGetIntegerValueField(event, kCGEventSourceUnixProcessID);
+            int injected = (srcPid != 0) ? 1 : 0;
+            int is_down = (type == kCGEventLeftMouseDown) ? 1 : 0;
+            on_mouse_event(0, is_down, injected, userInfo);
+            break;
+        }
 
         case kCGEventTapDisabledByTimeout:
         case kCGEventTapDisabledByUserInput:
