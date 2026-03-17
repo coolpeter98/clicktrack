@@ -1,6 +1,11 @@
 # clicktrack
 a vibe-coded solution for auto-click detection
 
+## introduction
+For years now, major game engines had one issue: input was bound to the client fps.
+this means that, if you click, you'll need to wait for the next frame to render before the game can process the input.
+that's an issue because it adds noise to solutions that would prevent auto-clickers. **clicktrack** fixes this!
+
 ## how to download?!?!?!
 go to this link: https://github.com/coolpeter98/clicktrack/
 you will see downloads for windows (x64, ARM) and linux (x64). no mac release because i need a mac computer to compile the program for it
@@ -8,11 +13,6 @@ you will see downloads for windows (x64, ARM) and linux (x64). no mac release be
 ## running
 on windows: extract the downloaded zip file and run the exe.
 on linux: open a terminal to the directory of where you downloaded the file, then run `chmod +x linux_x86_64` and then `./linux_x86_64`
-
-## introduction
-For years now, major game engines had one issue: input was bound to the client fps.
-this means that, if you click, you'll need to wait for the next frame to render before the game can process the input.
-that's an issue because it adds noise to solutions that would prevent auto-clickers. **clicktrack** fixes this!
 
 ## limitation(s)
 **mouse polling rate** still causes an unavoidable delay. it should be fine on mice with polling rate >= 1kHz though
