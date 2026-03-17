@@ -8,6 +8,7 @@ pub const Tracker = struct {
     last_release_ns: ?i128,
     down_ts: ?i128,
     down_interval: ?f64,
+    down_injected: bool,
     epoch_offset_ns: i128,
 
     pub fn init(path: []const u8) !Tracker {
@@ -17,7 +18,7 @@ pub const Tracker = struct {
 
         const file = try std.fs.cwd().createFile(path, .{});
         errdefer file.close();
-        try file.writeAll("id,timestamp_ms,hold_time_ms,interval_ms\n");
+        try file.writeAll("id,timestamp_ms,hold_time_ms,interval_ms,injected\n");
 
         return .{
             .file = file,
@@ -25,27 +26,32 @@ pub const Tracker = struct {
             .last_release_ns = null,
             .down_ts = null,
             .down_interval = null,
+            .down_injected = false,
             .epoch_offset_ns = epoch_offset,
         };
     }
 
-    pub fn onDown(self: *Tracker, ts_ns: i128) void {
+    pub fn onDown(self: *Tracker, ts_ns: i128, injected: bool) void {
         self.down_ts = ts_ns;
+        self.down_injected = injected;
         self.down_interval = if (self.last_release_ns) |lr| nsToMs(ts_ns - lr) else null;
     }
 
-    pub fn onUp(self: *Tracker, ts_ns: i128) void {
+    pub fn onUp(self: *Tracker, ts_ns: i128, injected: bool) void {
         const press_ts = self.down_ts orelse return;
         const hold_ms = nsToMs(ts_ns - press_ts);
         const epoch_ns = press_ts + self.epoch_offset_ns;
         const ts_ms = nsToMs(epoch_ns);
         const interval = self.down_interval;
+        // Flag as injected if either press or release was injected
+        const was_injected = self.down_injected or injected;
 
         var buf: [256]u8 = undefined;
+        const inj_str: []const u8 = if (was_injected) "true" else "false";
         const line = if (interval) |iv|
-            std.fmt.bufPrint(&buf, "{d},{d:.6},{d:.3},{d:.3}\n", .{ self.next_id, ts_ms, hold_ms, iv }) catch return
+            std.fmt.bufPrint(&buf, "{d},{d:.6},{d:.3},{d:.3},{s}\n", .{ self.next_id, ts_ms, hold_ms, iv, inj_str }) catch return
         else
-            std.fmt.bufPrint(&buf, "{d},{d:.6},{d:.3},\n", .{ self.next_id, ts_ms, hold_ms }) catch return;
+            std.fmt.bufPrint(&buf, "{d},{d:.6},{d:.3},,{s}\n", .{ self.next_id, ts_ms, hold_ms, inj_str }) catch return;
 
         self.file.writeAll(line) catch return;
         self.next_id += 1;
@@ -63,12 +69,12 @@ pub const Tracker = struct {
     }
 };
 
-// C callback bridge — only left-click (button == 0) is forwarded
-export fn on_mouse_event(button: u8, is_down: c_int, userdata: ?*anyopaque) callconv(.c) void {
+export fn on_mouse_event(button: u8, is_down: c_int, injected: c_int, userdata: ?*anyopaque) callconv(.c) void {
     if (button != 0) return;
     const ts = std.time.nanoTimestamp();
     const tracker: *Tracker = @ptrCast(@alignCast(userdata.?));
-    if (is_down != 0) tracker.onDown(ts) else tracker.onUp(ts);
+    const inj = injected != 0;
+    if (is_down != 0) tracker.onDown(ts, inj) else tracker.onUp(ts, inj);
 }
 
 const linux_impl = if (builtin.os.tag == .linux) struct {
@@ -119,6 +125,8 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
         return null;
     }
 
+    // evdev only receives events from physical hardware — injected clicks
+    // via X11/Wayland don't appear here, so injected is always false.
     pub fn run(tracker: *Tracker, device_path: ?[]const u8, allocator: std.mem.Allocator) !void {
         const path = device_path orelse try findMouseDevice(allocator) orelse {
             std.debug.print("Error: no mouse device found. Try running as root or specify a device.\n", .{});
@@ -148,7 +156,7 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
                 if (ev.type != EV_KEY or ev.code != BTN_LEFT) continue;
                 if (ev.value == 2) continue;
                 const ts = std.time.nanoTimestamp();
-                if (ev.value == 1) tracker.onDown(ts) else tracker.onUp(ts);
+                if (ev.value == 1) tracker.onDown(ts, false) else tracker.onUp(ts, false);
             }
         }
     }
@@ -159,7 +167,6 @@ extern fn platform_run_macos(userdata: ?*anyopaque) callconv(.c) c_int;
 
 fn generateFilename(buf: []u8) ![]const u8 {
     const ts = std.time.milliTimestamp();
-    // hash: xorshift on timestamp + a few nanoTimestamp samples
     var h: u64 = @bitCast(@as(i64, @intCast(ts)));
     h ^= @bitCast(@as(i64, @truncate(std.time.nanoTimestamp())));
     h ^= h >> 13;
@@ -187,7 +194,6 @@ pub fn main() !void {
                 device_path = arg;
             }
         } else {
-            // Treat as output path if first positional, device if second
             if (custom_output == null) custom_output = arg
             else device_path = arg;
         }
