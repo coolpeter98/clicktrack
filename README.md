@@ -8,11 +8,12 @@ that's an issue because it adds noise to solutions that would prevent auto-click
 
 ## how to download?!?!?!
 go to this link: https://github.com/coolpeter98/clicktrack/
-you will see downloads for windows (x64, ARM) and linux (x64). no mac release because i need a mac computer to compile the program for it
+you will see downloads for windows (x64, ARM), linux (x64) and macos (apple silicon/arm64).
 
 ## running
 on windows: extract the downloaded zip file and run the exe.
 on linux: open a terminal to the directory of where you downloaded the file, then run `chmod +x linux_x86_64` and then `./linux_x86_64`
+on mac: open a terminal to the directory of where you downloaded the file, then run `chmod +x macos_arm64` and then `./macos_arm64`
 
 ## limitation(s)
 **mouse polling rate** still causes an unavoidable delay. it should be fine on mice with polling rate >= 1kHz though
