@@ -7,7 +7,7 @@ this means that, if you click, you'll need to wait for the next frame to render 
 that's an issue because it adds noise to solutions that would prevent auto-clickers. **clicktrack** fixes this!
 
 ## how to download?!?!?!
-go to this link: https://github.com/coolpeter98/clicktrack/
+go to this link: https://github.com/coolpeter98/clicktrack/releases/
 you will see downloads for windows (x64, ARM), linux (x64) and macos (apple silicon/arm64).
 
 ## running
