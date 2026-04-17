@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
+    exe.root_module.strip = true;
 
     const os = target.result.os.tag;
 
