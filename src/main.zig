@@ -141,7 +141,7 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
         defer posix.close(fd);
 
         const ev_size = @sizeOf(InputEvent);
-        var read_buf: [ev_size * 64]u8 = undefined;
+        var read_buf: [ev_size * 64]u8 align(@alignOf(InputEvent)) = undefined;
 
         while (true) {
             const n = posix.read(fd, &read_buf) catch |err| {
@@ -194,8 +194,7 @@ pub fn main() !void {
                 device_path = arg;
             }
         } else {
-            if (custom_output == null) custom_output = arg
-            else device_path = arg;
+            if (custom_output == null) custom_output = arg else device_path = arg;
         }
     }
 
