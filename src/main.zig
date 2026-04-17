@@ -8,7 +8,7 @@ pub const Tracker = struct {
     last_release_ns: ?i128,
     down_ts: ?i128,
     down_interval: ?f64,
-    down_injected: bool,
+    down_device: []const u8,
     epoch_offset_ns: i128,
 
     pub fn init(path: []const u8) !Tracker {
@@ -18,7 +18,7 @@ pub const Tracker = struct {
 
         const file = try std.fs.cwd().createFile(path, .{});
         errdefer file.close();
-        try file.writeAll("id,timestamp_ms,hold_time_ms,interval_ms,injected\n");
+        try file.writeAll("id,timestamp_ms,hold_time_ms,interval_ms,device\n");
 
         return .{
             .file = file,
@@ -26,32 +26,30 @@ pub const Tracker = struct {
             .last_release_ns = null,
             .down_ts = null,
             .down_interval = null,
-            .down_injected = false,
+            .down_device = "",
             .epoch_offset_ns = epoch_offset,
         };
     }
 
-    pub fn onDown(self: *Tracker, ts_ns: i128, injected: bool) void {
+    pub fn onDown(self: *Tracker, ts_ns: i128, device: []const u8) void {
         self.down_ts = ts_ns;
-        self.down_injected = injected;
+        self.down_device = device;
         self.down_interval = if (self.last_release_ns) |lr| nsToMs(ts_ns - lr) else null;
     }
 
-    pub fn onUp(self: *Tracker, ts_ns: i128, injected: bool) void {
+    pub fn onUp(self: *Tracker, ts_ns: i128, device: []const u8) void {
         const press_ts = self.down_ts orelse return;
         const hold_ms = nsToMs(ts_ns - press_ts);
         const epoch_ns = press_ts + self.epoch_offset_ns;
         const ts_ms = nsToMs(epoch_ns);
         const interval = self.down_interval;
-        // Flag as injected if either press or release was injected
-        const was_injected = self.down_injected or injected;
+        const dev = if (self.down_device.len > 0) self.down_device else device;
 
-        var buf: [256]u8 = undefined;
-        const inj_str: []const u8 = if (was_injected) "true" else "false";
+        var buf: [512]u8 = undefined;
         const line = if (interval) |iv|
-            std.fmt.bufPrint(&buf, "{d},{d:.6},{d:.3},{d:.3},{s}\n", .{ self.next_id, ts_ms, hold_ms, iv, inj_str }) catch return
+            std.fmt.bufPrint(&buf, "{d},{d:.6},{d:.3},{d:.3},{s}\n", .{ self.next_id, ts_ms, hold_ms, iv, dev }) catch return
         else
-            std.fmt.bufPrint(&buf, "{d},{d:.6},{d:.3},,{s}\n", .{ self.next_id, ts_ms, hold_ms, inj_str }) catch return;
+            std.fmt.bufPrint(&buf, "{d},{d:.6},{d:.3},,{s}\n", .{ self.next_id, ts_ms, hold_ms, dev }) catch return;
 
         self.file.writeAll(line) catch return;
         self.next_id += 1;
@@ -69,12 +67,12 @@ pub const Tracker = struct {
     }
 };
 
-export fn on_mouse_event(button: u8, is_down: c_int, injected: c_int, userdata: ?*anyopaque) callconv(.c) void {
+export fn on_mouse_event(button: u8, is_down: c_int, device: [*:0]const u8, userdata: ?*anyopaque) callconv(.c) void {
     if (button != 0) return;
     const ts = std.time.nanoTimestamp();
     const tracker: *Tracker = @ptrCast(@alignCast(userdata.?));
-    const inj = injected != 0;
-    if (is_down != 0) tracker.onDown(ts, inj) else tracker.onUp(ts, inj);
+    const dev = std.mem.sliceTo(device, 0);
+    if (is_down != 0) tracker.onDown(ts, dev) else tracker.onUp(ts, dev);
 }
 
 const linux_impl = if (builtin.os.tag == .linux) struct {
@@ -140,6 +138,11 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
         const fd = try posix.open(path, .{ .ACCMODE = .RDONLY }, 0);
         defer posix.close(fd);
 
+        var name_buf: [255]u8 = undefined;
+        const EVIOCGNAME: u32 = 0x80FF4506;
+        const name_rc = std.os.linux.ioctl(fd, EVIOCGNAME, @intFromPtr(&name_buf));
+        const device_name: []const u8 = if (@as(isize, @bitCast(name_rc)) >= 0) std.mem.sliceTo(&name_buf, 0) else "unknown";
+
         const ev_size = @sizeOf(InputEvent);
         var read_buf: [ev_size * 64]u8 align(@alignOf(InputEvent)) = undefined;
 
@@ -156,7 +159,7 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
                 if (ev.type != EV_KEY or ev.code != BTN_LEFT) continue;
                 if (ev.value == 2) continue;
                 const ts = std.time.nanoTimestamp();
-                if (ev.value == 1) tracker.onDown(ts, false) else tracker.onUp(ts, false);
+                if (ev.value == 1) tracker.onDown(ts, device_name) else tracker.onUp(ts, device_name);
             }
         }
     }

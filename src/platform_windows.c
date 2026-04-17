@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-extern void on_mouse_event(uint8_t button, int is_down, int injected, void *userdata);
+extern void on_mouse_event(uint8_t button, int is_down, const char* device, void *userdata);
 
 static void *g_userdata = NULL;
 
@@ -13,13 +13,20 @@ static void *g_userdata = NULL;
 static void process_raw_input(RAWINPUT *raw) {
     if (raw->header.dwType != RIM_TYPEMOUSE) return;
 
-    // hDevice == NULL means the event was injected by software
-    // (SendInput, mouse_event, etc.) rather than a physical device
-    int injected = (raw->header.hDevice == NULL) ? 1 : 0;
+    char device[256];
+    if (raw->header.hDevice == NULL) {
+        snprintf(device, sizeof(device), "injected");
+    } else {
+        UINT size = sizeof(device);
+        UINT result = GetRawInputDeviceInfoA(raw->header.hDevice, RIDI_DEVICENAME, device, &size);
+        if (result == (UINT)-1 || result == 0) {
+            snprintf(device, sizeof(device), "handle:%p", (void*)raw->header.hDevice);
+        }
+    }
 
     USHORT flags = raw->data.mouse.usButtonFlags;
-    if (flags & RI_MOUSE_LEFT_BUTTON_DOWN) on_mouse_event(0, 1, injected, g_userdata);
-    if (flags & RI_MOUSE_LEFT_BUTTON_UP)   on_mouse_event(0, 0, injected, g_userdata);
+    if (flags & RI_MOUSE_LEFT_BUTTON_DOWN) on_mouse_event(0, 1, device, g_userdata);
+    if (flags & RI_MOUSE_LEFT_BUTTON_UP)   on_mouse_event(0, 0, device, g_userdata);
 }
 
 static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
