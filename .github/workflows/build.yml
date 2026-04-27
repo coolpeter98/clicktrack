@@ -3,8 +3,12 @@ name: build
 on:
   push:
   pull_request:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      make-release:
+        type: boolean
+        description: "Create a release from this run"
+        default: false
 
 jobs:
   build:
@@ -28,9 +32,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: mlugg/setup-zig@v1
-        with:
-          version: 0.15.2
+      - run: |
+          set -e
+          A=$(uname -m | sed 's/arm64/aarch64/')
+          case "$RUNNER_OS" in
+            Linux)   curl -sSL "https://ziglang.org/download/0.15.2/zig-$A-linux-0.15.2.tar.xz" | tar xJ;;
+            macOS)   curl -sSL "https://ziglang.org/download/0.15.2/zig-$A-macos-0.15.2.tar.xz" | tar xJ;;
+            Windows) curl -sSL "https://ziglang.org/download/0.15.2/zig-$A-windows-0.15.2.zip" -o zig.zip && unzip -q zig.zip && rm zig.zip;;
+          esac
+          echo "$PWD/zig-$A-$(echo $RUNNER_OS | tr 'A-Z' 'a-z')-0.15.2" >> $GITHUB_PATH
+        shell: bash
 
       - run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
 
@@ -40,7 +51,7 @@ jobs:
           path: zig-out/bin/${{ matrix.artifact }}
 
   create-release:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event.inputs.make-release == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -55,3 +66,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          tag_name: ${{ github.ref_name }}
