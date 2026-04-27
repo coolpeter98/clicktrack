@@ -1,6 +1,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <hidsdi.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdint.h>
 
 extern void on_mouse_event(uint8_t button, int is_down, const char* device, void *userdata);
@@ -10,6 +12,41 @@ static void *g_userdata = NULL;
 #define RI_MOUSE_LEFT_BUTTON_DOWN   0x0001
 #define RI_MOUSE_LEFT_BUTTON_UP     0x0002
 
+static void get_device_friendly_name(HANDLE hDevice, char *name, UINT nameSize) {
+    char devicePath[256];
+    UINT pathSize = sizeof(devicePath);
+    if (GetRawInputDeviceInfoA(hDevice, RIDI_DEVICENAME, devicePath, &pathSize) == (UINT)-1) {
+        snprintf(name, nameSize, "unknown");
+        return;
+    }
+
+    HANDLE h = CreateFileA(devicePath, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (h != INVALID_HANDLE_VALUE) {
+        wchar_t productName[128];
+        if (HidD_GetProductString(h, productName, sizeof(productName))) {
+            int len = WideCharToMultiByte(CP_UTF8, 0, productName, -1, name, nameSize, NULL, NULL);
+            if (len > 1) {
+                CloseHandle(h);
+                return;
+            }
+        }
+        CloseHandle(h);
+    }
+
+    const char *vid = strstr(devicePath, "VID_");
+    const char *pid = strstr(devicePath, "PID_");
+    if (vid && pid && vid < pid) {
+        char vidHex[8] = {0};
+        char pidHex[8] = {0};
+        memcpy(vidHex, vid + 4, 4);
+        memcpy(pidHex, pid + 4, 4);
+        snprintf(name, nameSize, "HID#%s/%s", vidHex, pidHex);
+        return;
+    }
+
+    snprintf(name, nameSize, "handle:%p", (void*)hDevice);
+}
+
 static void process_raw_input(RAWINPUT *raw) {
     if (raw->header.dwType != RIM_TYPEMOUSE) return;
 
@@ -17,11 +54,7 @@ static void process_raw_input(RAWINPUT *raw) {
     if (raw->header.hDevice == NULL) {
         snprintf(device, sizeof(device), "injected");
     } else {
-        UINT size = sizeof(device);
-        UINT result = GetRawInputDeviceInfoA(raw->header.hDevice, RIDI_DEVICENAME, device, &size);
-        if (result == (UINT)-1 || result == 0) {
-            snprintf(device, sizeof(device), "handle:%p", (void*)raw->header.hDevice);
-        }
+        get_device_friendly_name(raw->header.hDevice, device, sizeof(device));
     }
 
     USHORT flags = raw->data.mouse.usButtonFlags;

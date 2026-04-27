@@ -24,6 +24,7 @@ pub fn build(b: *std.Build) void {
         });
         exe.root_module.linkSystemLibrary("user32", .{});
         exe.root_module.linkSystemLibrary("kernel32", .{});
+        exe.root_module.linkSystemLibrary("hid", .{});
     }
 
     if (os == .macos) {

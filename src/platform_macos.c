@@ -27,7 +27,14 @@ static CGEventRef tap_callback(
             if (srcPid != 0) {
                 snprintf(device, sizeof(device), "injected");
             } else {
-                snprintf(device, sizeof(device), "hardware");
+                int64_t userData = CGEventGetIntegerValueField(event, kCGEventSourceUserData);
+                uint16_t vid = (userData >> 16) & 0xFFFF;
+                uint16_t pid = userData & 0xFFFF;
+                if (vid != 0 || pid != 0) {
+                    snprintf(device, sizeof(device), "hw:%04X/%04X", vid, pid);
+                } else {
+                    snprintf(device, sizeof(device), "hardware");
+                }
             }
             on_mouse_event(0, is_down, device, userInfo);
             break;
