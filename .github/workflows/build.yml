@@ -1,0 +1,57 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-linux
+            artifact: clicktrack
+          - os: ubuntu-latest
+            target: x86_64-windows
+            artifact: clicktrack.exe
+          - os: macos-latest
+            target: x86_64-macos
+            artifact: clicktrack
+          - os: macos-latest
+            target: aarch64-macos
+            artifact: clicktrack
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2
+
+      - run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clicktrack-${{ matrix.target }}
+          path: zig-out/bin/${{ matrix.artifact }}
+
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: clicktrack-*
+          merge-multiple: true
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
