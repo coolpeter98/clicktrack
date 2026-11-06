@@ -3,7 +3,8 @@ const builtin = @import("builtin");
 const posix = std.posix;
 
 pub const Tracker = struct {
-    file: std.fs.File,
+    io: std.Io,
+    file: std.Io.File,
     next_id: u64,
     last_release_ns: ?i128,
     down_ts: ?i128,
@@ -11,16 +12,16 @@ pub const Tracker = struct {
     down_device: []const u8,
     epoch_offset_ns: i128,
 
-    pub fn init(path: []const u8) !Tracker {
-        const mono = std.time.nanoTimestamp();
-        const epoch_ms = std.time.milliTimestamp();
-        const epoch_offset = @as(i128, epoch_ms) * 1_000_000 - mono;
+    pub fn init(io: std.Io, path: []const u8) !Tracker {
+        const mono = std.Io.Clock.awake.now(io).toNanoseconds();
+        const epoch_offset = @as(i128, std.Io.Clock.real.now(io).toNanoseconds()) - mono;
 
-        const file = try std.fs.cwd().createFile(path, .{});
-        errdefer file.close();
-        try file.writeAll("id,timestamp_ms,hold_time_ms,interval_ms,device\n");
+        const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+        errdefer file.close(io);
+        try file.writeStreamingAll(io, "id,timestamp_ms,hold_time_ms,interval_ms,device\n");
 
         return .{
+            .io = io,
             .file = file,
             .next_id = 1,
             .last_release_ns = null,
@@ -29,6 +30,10 @@ pub const Tracker = struct {
             .down_device = "",
             .epoch_offset_ns = epoch_offset,
         };
+    }
+
+    pub fn now(self: *Tracker) i128 {
+        return std.Io.Clock.awake.now(self.io).toNanoseconds();
     }
 
     pub fn onDown(self: *Tracker, ts_ns: i128, device: []const u8) void {
@@ -51,14 +56,14 @@ pub const Tracker = struct {
         else
             std.fmt.bufPrint(&buf, "{d},{d:.6},{d:.3},,{s}\n", .{ self.next_id, ts_ms, hold_ms, dev }) catch return;
 
-        self.file.writeAll(line) catch return;
+        self.file.writeStreamingAll(self.io, line) catch return;
         self.next_id += 1;
         self.last_release_ns = ts_ns;
         self.down_ts = null;
     }
 
     pub fn deinit(self: *Tracker) void {
-        self.file.close();
+        self.file.close(self.io);
     }
 
     fn nsToMs(ns: i128) f64 {
@@ -69,8 +74,8 @@ pub const Tracker = struct {
 
 export fn on_mouse_event(button: u8, is_down: c_int, device: [*:0]const u8, userdata: ?*anyopaque) callconv(.c) void {
     if (button != 0) return;
-    const ts = std.time.nanoTimestamp();
     const tracker: *Tracker = @ptrCast(@alignCast(userdata.?));
+    const ts = tracker.now();
     const dev = std.mem.sliceTo(device, 0);
     if (is_down != 0) tracker.onDown(ts, dev) else tracker.onUp(ts, dev);
 }
@@ -97,36 +102,40 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
         name: []const u8,
     };
 
-    fn findMouseDevices(allocator: std.mem.Allocator) ![]Device {
-        var list = std.ArrayList(Device){};
+    fn closeFd(fd: posix.fd_t) void {
+        _ = std.os.linux.close(fd);
+    }
+
+    fn findMouseDevices(io: std.Io, allocator: std.mem.Allocator) ![]Device {
+        var list: std.ArrayList(Device) = .empty;
         errdefer {
             for (list.items) |d| {
-                posix.close(d.fd);
+                closeFd(d.fd);
                 allocator.free(d.name);
             }
             list.deinit(allocator);
         }
 
-        var dir = std.fs.openDirAbsolute("/dev/input", .{ .iterate = true }) catch return &.{};
-        defer dir.close();
+        var dir = std.Io.Dir.openDirAbsolute(io, "/dev/input", .{ .iterate = true }) catch return &.{};
+        defer dir.close(io);
         var iter = dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(io)) |entry| {
             if (!std.mem.startsWith(u8, entry.name, "event")) continue;
             const path = try std.fmt.allocPrint(allocator, "/dev/input/{s}", .{entry.name});
             defer allocator.free(path);
 
-            const fd = posix.open(path, .{ .ACCMODE = .RDONLY }, 0) catch continue;
+            const fd = posix.openat(posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0) catch continue;
 
             var key_bits: [96]u8 = std.mem.zeroes([96]u8);
             const key_rc = std.os.linux.ioctl(fd, EVIOCGBIT_KEY, @intFromPtr(&key_bits));
             if (@as(isize, @bitCast(key_rc)) < 0) {
-                posix.close(fd);
+                closeFd(fd);
                 continue;
             }
             const byte_idx = BTN_LEFT / 8;
             const bit_idx: u3 = @intCast(BTN_LEFT % 8);
             if (key_bits[byte_idx] & (@as(u8, 1) << bit_idx) == 0) {
-                posix.close(fd);
+                closeFd(fd);
                 continue;
             }
 
@@ -149,15 +158,15 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
             const ev: *const InputEvent = @ptrCast(@alignCast(buf[offset..][0..ev_size]));
             if (ev.type != EV_KEY or ev.code != BTN_LEFT) continue;
             if (ev.value == 2) continue;
-            const ts = std.time.nanoTimestamp();
+            const ts = tracker.now();
             if (ev.value == 1) tracker.onDown(ts, device_name) else tracker.onUp(ts, device_name);
         }
     }
 
     pub fn run(tracker: *Tracker, device_path: ?[]const u8, allocator: std.mem.Allocator) !void {
         if (device_path) |path| {
-            const fd = try posix.open(path, .{ .ACCMODE = .RDONLY }, 0);
-            defer posix.close(fd);
+            const fd = try posix.openat(posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0);
+            defer closeFd(fd);
 
             var name_buf: [255]u8 = undefined;
             const name_rc = std.os.linux.ioctl(fd, EVIOCGNAME, @intFromPtr(&name_buf));
@@ -178,10 +187,10 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
             }
         }
 
-        const devices = try findMouseDevices(allocator);
+        const devices = try findMouseDevices(tracker.io, allocator);
         defer {
             for (devices) |d| {
-                posix.close(d.fd);
+                closeFd(d.fd);
                 allocator.free(d.name);
             }
             allocator.free(devices);
@@ -201,7 +210,7 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
         const epfd_raw = std.os.linux.epoll_create1(0);
         if (@as(isize, @bitCast(epfd_raw)) < 0) return error.EpollCreateFailed;
         const epfd: i32 = @intCast(epfd_raw);
-        defer _ = std.posix.close(@intCast(epfd));
+        defer closeFd(epfd);
 
         for (devices) |*d| {
             var ev: std.os.linux.epoll_event = .{
@@ -247,23 +256,22 @@ const linux_impl = if (builtin.os.tag == .linux) struct {
 extern fn platform_run_windows(userdata: ?*anyopaque) callconv(.c) c_int;
 extern fn platform_run_macos(userdata: ?*anyopaque) callconv(.c) c_int;
 
-fn generateFilename(buf: []u8) ![]const u8 {
-    const ts = std.time.milliTimestamp();
-    var h: u64 = @bitCast(@as(i64, @intCast(ts)));
-    h ^= @bitCast(@as(i64, @truncate(std.time.nanoTimestamp())));
+fn generateFilename(io: std.Io, buf: []u8) ![]const u8 {
+    const now = std.Io.Clock.real.now(io);
+    const ts = now.toMilliseconds();
+    var h: u64 = @bitCast(ts);
+    h ^= @bitCast(@as(i64, @truncate(now.toNanoseconds())));
     h ^= h >> 13;
     h *%= 0x2545F4914F6CDD1D;
     h ^= h >> 27;
     return std.fmt.bufPrint(buf, "clicks_{d}_{x:0>8}.csv", .{ ts, @as(u32, @truncate(h)) });
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.gpa;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     var device_path: ?[]const u8 = null;
     var custom_output: ?[]const u8 = null;
@@ -281,9 +289,9 @@ pub fn main() !void {
     }
 
     var name_buf: [128]u8 = undefined;
-    const output_path = custom_output orelse try generateFilename(&name_buf);
+    const output_path = custom_output orelse try generateFilename(io, &name_buf);
 
-    var tracker = try Tracker.init(output_path);
+    var tracker = try Tracker.init(io, output_path);
     defer tracker.deinit();
 
     std.debug.print("clicktrack – writing to {s}  (Ctrl+C to stop)\n", .{output_path});

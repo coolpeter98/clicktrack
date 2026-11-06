@@ -11,6 +11,15 @@ static void *g_userdata = NULL;
 
 #define RI_MOUSE_LEFT_BUTTON_DOWN   0x0001
 #define RI_MOUSE_LEFT_BUTTON_UP     0x0002
+#define MAX_CACHED_DEVICES          16
+
+typedef struct {
+    HANDLE handle;
+    char name[256];
+} cached_device;
+
+static cached_device g_cached_devices[MAX_CACHED_DEVICES];
+static int g_cached_device_count = 0;
 
 static void get_device_friendly_name(HANDLE hDevice, char *name, UINT nameSize) {
     char devicePath[256];
@@ -47,17 +56,27 @@ static void get_device_friendly_name(HANDLE hDevice, char *name, UINT nameSize) 
     snprintf(name, nameSize, "handle:%p", (void*)hDevice);
 }
 
+/* get_device_friendly_name sends a request to the mouse itself, so it must only run once per device */
+static const char *get_cached_device_name(HANDLE hDevice) {
+    for (int i = 0; i < g_cached_device_count; i++) {
+        if (g_cached_devices[i].handle == hDevice) return g_cached_devices[i].name;
+    }
+    if (g_cached_device_count == MAX_CACHED_DEVICES) return "unknown";
+
+    cached_device *entry = &g_cached_devices[g_cached_device_count++];
+    entry->handle = hDevice;
+    get_device_friendly_name(hDevice, entry->name, sizeof(entry->name));
+    return entry->name;
+}
+
 static void process_raw_input(RAWINPUT *raw) {
     if (raw->header.dwType != RIM_TYPEMOUSE) return;
 
-    char device[256];
-    if (raw->header.hDevice == NULL) {
-        snprintf(device, sizeof(device), "injected");
-    } else {
-        get_device_friendly_name(raw->header.hDevice, device, sizeof(device));
-    }
-
     USHORT flags = raw->data.mouse.usButtonFlags;
+    if (!(flags & (RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_LEFT_BUTTON_UP))) return;
+
+    const char *device = raw->header.hDevice == NULL ? "injected" : get_cached_device_name(raw->header.hDevice);
+
     if (flags & RI_MOUSE_LEFT_BUTTON_DOWN) on_mouse_event(0, 1, device, g_userdata);
     if (flags & RI_MOUSE_LEFT_BUTTON_UP)   on_mouse_event(0, 0, device, g_userdata);
 }
