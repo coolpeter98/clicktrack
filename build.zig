@@ -4,8 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const os = target.result.os.tag;
+    const arch = target.result.cpu.arch;
+    const arch_name = if (arch == .aarch64) "arm64" else @tagName(arch);
+
     const exe = b.addExecutable(.{
-        .name = "clicktrack",
+        .name = b.fmt("{s}_{s}", .{ @tagName(os), arch_name }),
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -14,8 +18,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
     exe.root_module.strip = true;
-
-    const os = target.result.os.tag;
 
     if (os == .windows) {
         exe.root_module.addCSourceFile(.{

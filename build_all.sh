@@ -20,9 +20,9 @@ zig build $OPTS -Dtarget=x86_64-linux -p dist/linux-x64
 
 echo
 echo "done:"
-echo "  dist/windows-x64/bin/clicktrack.exe"
-echo "  dist/windows-arm64/bin/clicktrack.exe"
-echo "  dist/linux-x64/bin/clicktrack"
+echo "  dist/windows-x64/bin/windows_x86_64.exe"
+echo "  dist/windows-arm64/bin/windows_arm64.exe"
+echo "  dist/linux-x64/bin/linux_x86_64"
 echo
 echo "to build for macOS, run on a Mac:"
 echo "  zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos -p dist/macos-x64"
